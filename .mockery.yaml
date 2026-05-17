@@ -1,0 +1,12 @@
+all: false
+dir: "{{.InterfaceDir}}/mocks"
+structname: "Mock{{.InterfaceName}}"
+pkgname: "mocks"
+filename: "mock_{{.InterfaceName | snakecase }}.go"
+formatter: goimports
+generate: true
+template: testify
+packages:
+  github.com/wattanar/taskmanager/internal/domain/task:
+    config:
+      all: true

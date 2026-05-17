@@ -1,0 +1,26 @@
+.git/
+.gitignore
+.gitattributes
+
+.idea/
+.vscode/
+*.md
+
+bin/
+vendor/
+
+.env
+.env.local
+.env.*.local
+
+# Generated (regenerated in CI)
+api/spec/
+internal/domain/**/mocks/
+
+# Tests (not needed at runtime)
+*_test.go
+*.test
+
+# CI
+.github/
+.dockerignore

@@ -1,0 +1,7 @@
+output: api/spec
+package: spec
+generate:
+  types: true
+  server: true
+output-options:
+  skip-prune: true
