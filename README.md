@@ -33,11 +33,16 @@ make test
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST`   | `/api/v1/tasks`      | Create a task |
-| `GET`    | `/api/v1/tasks`      | List tasks (optional `?status=` & `?priority=` filters) |
-| `GET`    | `/api/v1/tasks/{id}` | Get a task by ID |
-| `PATCH`  | `/api/v1/tasks/{id}` | Update a task |
-| `DELETE` | `/api/v1/tasks/{id}` | Delete a task |
+| `POST`   | `/api/v1/tasks`          | Create a task |
+| `GET`    | `/api/v1/tasks`          | List tasks (optional `?status=` & `?priority=` filters) |
+| `GET`    | `/api/v1/tasks/{id}`     | Get a task by ID |
+| `PATCH`  | `/api/v1/tasks/{id}`     | Update a task |
+| `DELETE` | `/api/v1/tasks/{id}`     | Delete a task |
+| `POST`   | `/api/v1/departments`    | Create a department |
+| `GET`    | `/api/v1/departments`    | List all departments |
+| `GET`    | `/api/v1/departments/{id}` | Get a department by ID |
+| `PATCH`  | `/api/v1/departments/{id}` | Update a department |
+| `DELETE` | `/api/v1/departments/{id}` | Delete a department |
 
 OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml).
 
@@ -47,15 +52,17 @@ OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml).
 ├── api/
 │   ├── openapi.yaml              # OpenAPI 3.0.3 spec
 │   └── spec/server.gen.go        # Generated types + ServerInterface
-├── cmd/server/main.go            # Composition root / entry point
+├── cmd/server/main.go            # Composition root (uber-go/fx)
 ├── internal/
-│   ├── domain/                   # Business logic (zero external deps)
+│   ├── domain/                   # Business logic
 │   │   ├── task/                 # Task aggregate: entity, value objects, events, repository port
+│   │   ├── department/           # Department aggregate: entity, value objects, events, repository port
 │   │   └── errors/              # Domain error types
 │   ├── application/              # Use cases (depends on domain only)
-│   │   └── task/                 # Create, Get, List, Update, Delete use cases
+│   │   ├── task/                 # Task use cases (create, get, list, update, delete)
+│   │   └── department/           # Department use cases (create, get, list, update, delete)
 │   └── infrastructure/          # Adapters (implements ports)
-│       ├── persistence/postgres/ # PostgreSQL adapter using pgx v5
+│       ├── persistence/postgres/ # PostgreSQL adapter using pgx v5 + squirrel
 │       └── http/                 # HTTP handlers (implements ServerInterface)
 ├── migrations/                   # Liquibase changelog + SQL
 ├── docker-compose.yml            # PostgreSQL 17
@@ -86,14 +93,14 @@ OpenAPI spec at [`api/openapi.yaml`](api/openapi.yaml).
 
 | Layer | Count | Approach |
 |-------|-------|----------|
-| Domain | 11 | Pure unit tests, no deps |
-| Application | 8 | Mockery-generated mocks |
-| HTTP | 6 | httptest with mocked use cases |
+| Domain | 17 | Pure unit tests, no deps |
+| Application | 16 | Mockery-generated mocks |
+| HTTP | 13 | httptest with mocked use cases |
 | Integration | 1 | Real PostgreSQL (`DATABASE_URL` env) |
 
 ```bash
-make test        # 45 tests, all layers
-make test/unit   # 19 tests, fast (< 1s)
+make test        # 78 tests, all layers
+make test/unit   # 33 tests, fast (< 1s)
 ```
 
 ## Configuration
@@ -106,7 +113,8 @@ make test/unit   # 19 tests, fast (< 1s)
 ## Dependencies
 
 - **HTTP** — Go 1.22+ stdlib (`net/http`, enhanced ServeMux with method routing)
-- **Database** — `github.com/jackc/pgx/v5`
+- **Database** — `github.com/jackc/pgx/v5` + `github.com/Masterminds/squirrel`
+- **DI** — `go.uber.org/fx`
 - **Codegen** — `oapi-codegen` (OpenAPI), `mockery` (mocks)
 - **Migrations** — Liquibase via Docker
 
@@ -119,5 +127,8 @@ make test/unit   # 19 tests, fast (< 1s)
 | `Description` | 0–2000 characters |
 | `TaskStatus` | `todo` → `in_progress` → `done` (reopenable) |
 | `Priority` | `low`, `medium`, `high`, `critical` |
+| `DepartmentID` | UUID v4 |
+| `DepartmentName` | 1–200 characters |
+| `DepartmentDescription` | 0–2000 characters |
 
-Domain events (`task.created`, `task.status_changed`, `task.title_changed`, `task.deleted`) are collected on the entity and available via `PullEvents()`.
+Domain events (`task.created`, `task.status_changed`, `task.title_changed`, `task.deleted`, `department.created`, `department.name_changed`, `department.deleted`) are collected on the entity and available via `PullEvents()`.

@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 info:
   title: Task Manager API
-  description: REST API for managing tasks
+  description: REST API for managing tasks and departments
   version: "1.0.0"
 servers:
   - url: http://localhost:8080
@@ -134,6 +134,121 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /api/v1/departments:
+    get:
+      operationId: listDepartments
+      summary: List all departments
+      responses:
+        '200':
+          description: List of departments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Department'
+    post:
+      operationId: createDepartment
+      summary: Create a new department
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDepartmentRequest'
+      responses:
+        '201':
+          description: Department created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/departments/{id}:
+    get:
+      operationId: getDepartment
+      summary: Get a department by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Department found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+        '404':
+          description: Department not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    patch:
+      operationId: updateDepartment
+      summary: Update a department
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateDepartmentRequest'
+      responses:
+        '200':
+          description: Department updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Department'
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '404':
+          description: Department not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+    delete:
+      operationId: deleteDepartment
+      summary: Delete a department
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '204':
+          description: Department deleted
+        '404':
+          description: Department not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   schemas:
     Task:
@@ -197,6 +312,49 @@ components:
     Priority:
       type: string
       enum: [low, medium, high, critical]
+
+    Department:
+      type: object
+      required: [id, name, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateDepartmentRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+        description:
+          type: string
+          maxLength: 2000
+
+    UpdateDepartmentRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 200
+          minLength: 1
+        description:
+          type: string
+          maxLength: 2000
 
     Error:
       type: object

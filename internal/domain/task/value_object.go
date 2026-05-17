@@ -23,6 +23,8 @@ func ParseTaskID(s string) (TaskID, error) {
 	return TaskID{UUID: id}, nil
 }
 
+func (id TaskID) String() string { return id.UUID.String() }
+
 type Title struct {
 	value string
 }

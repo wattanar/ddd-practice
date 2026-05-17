@@ -5,79 +5,40 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.uber.org/fx"
 	"github.com/wattanar/taskmanager/api/spec"
+	deptapp "github.com/wattanar/taskmanager/internal/application/department"
 	taskapp "github.com/wattanar/taskmanager/internal/application/task"
 	"github.com/wattanar/taskmanager/internal/infrastructure/http"
 	"github.com/wattanar/taskmanager/internal/infrastructure/persistence/postgres"
 )
 
 func main() {
-	cfg := loadConfig()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
-	if err != nil {
-		slog.Error("failed to connect to database", "error", err)
-		os.Exit(1)
-	}
-	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		slog.Error("failed to ping database", "error", err)
-		os.Exit(1)
-	}
-
-	repo := postgres.NewTaskRepository(pool)
-
-	createUC := taskapp.NewCreateTaskUseCase(repo)
-	getUC := taskapp.NewGetTaskUseCase(repo)
-	listUC := taskapp.NewListTasksUseCase(repo)
-	updateUC := taskapp.NewUpdateTaskUseCase(repo)
-	deleteUC := taskapp.NewDeleteTaskUseCase(repo)
-
-	handler := taskhttp.NewTaskHandler(createUC, getUC, listUC, updateUC, deleteUC)
-
-	mux := http.NewServeMux()
-	specHandler := spec.HandlerFromMux(handler, mux)
-
-	srv := &http.Server{
-		Addr:         ":" + cfg.Port,
-		Handler:      taskhttp.RecoveryMiddleware(taskhttp.Middleware(specHandler)),
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	go func() {
-		slog.Info("server starting", "port", cfg.Port)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("server error", "error", err)
-			os.Exit(1)
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	slog.Info("shutting down server...")
-
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer shutdownCancel()
-
-	if err := srv.Shutdown(shutdownCtx); err != nil {
-		slog.Error("server forced to shutdown", "error", err)
-		os.Exit(1)
-	}
-
-	slog.Info("server stopped")
+	fx.New(
+		fx.Provide(
+			loadConfig,
+			newPool,
+			postgres.NewTaskRepository,
+			postgres.NewDepartmentRepository,
+			taskapp.NewCreateTaskUseCase,
+			taskapp.NewGetTaskUseCase,
+			taskapp.NewListTasksUseCase,
+			taskapp.NewUpdateTaskUseCase,
+			taskapp.NewDeleteTaskUseCase,
+			deptapp.NewCreateDepartmentUseCase,
+			deptapp.NewGetDepartmentUseCase,
+			deptapp.NewListDepartmentsUseCase,
+			deptapp.NewUpdateDepartmentUseCase,
+			deptapp.NewDeleteDepartmentUseCase,
+			taskhttp.NewTaskHandler,
+			taskhttp.NewDepartmentHandler,
+			taskhttp.NewAPIHandler,
+		),
+		fx.Invoke(startServer),
+	).Run()
 }
 
 type config struct {
@@ -100,4 +61,60 @@ func loadConfig() config {
 		DatabaseURL: dbURL,
 		Port:        port,
 	}
+}
+
+func newPool(lc fx.Lifecycle, cfg config) (*pgxpool.Pool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
+	lc.Append(fx.Hook{
+		OnStop: func(ctx context.Context) error {
+			pool.Close()
+			return nil
+		},
+	})
+
+	return pool, nil
+}
+
+func startServer(lc fx.Lifecycle, handler *taskhttp.APIHandler, cfg config) {
+	mux := http.NewServeMux()
+	specHandler := spec.HandlerFromMux(handler, mux)
+	wrapped := taskhttp.RecoveryMiddleware(taskhttp.Middleware(specHandler))
+
+	srv := &http.Server{
+		Addr:         ":" + cfg.Port,
+		Handler:      wrapped,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
+	lc.Append(fx.Hook{
+		OnStart: func(ctx context.Context) error {
+			slog.Info("server starting", "port", cfg.Port)
+			go func() {
+				if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					slog.Error("server error", "error", err)
+				}
+			}()
+			return nil
+		},
+		OnStop: func(ctx context.Context) error {
+			slog.Info("shutting down server...")
+			shutdownCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			return srv.Shutdown(shutdownCtx)
+		},
+	})
 }

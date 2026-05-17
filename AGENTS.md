@@ -3,15 +3,16 @@
 ## Architecture (Dependency Flow)
 
 ```
-infrastructure/http → application/task → domain/task
-                                       ↗
-infrastructure/persistence/postgres ──┘
+infrastructure/http → application/{task,department} → domain/{task,department}
+                                                     ↗
+infrastructure/persistence/postgres ──────────────────┘
 ```
 
-- **`domain/task`** — zero external deps (no pgx, no HTTP). All business rules here.
-- **`application/task`** — depends only on `domain/task`. One use case per file.
-- **`infrastructure/persistence/postgres`** — implements `task.TaskRepository` port. Returns `nil, nil` on not-found (not an error).
-- **`infrastructure/http`** — implements generated `ServerInterface`. Translates OpenAPI DTOs ↔ domain objects. Must NOT leak domain types to the API spec or vice versa.
+Two bounded contexts, same layered pattern:
+- **`domain/{task,department}`** — zero external deps. All business rules here.
+- **`application/{task,department}`** — depends only on its domain package. One use case per file.
+- **`infrastructure/persistence/postgres`** — implements repository ports. Returns `nil, nil` on not-found (not an error).
+- **`infrastructure/http`** — implements generated `ServerInterface`. Two handlers (`TaskHandler`, `DepartmentHandler`) composed via `APIHandler`. Translates OpenAPI DTOs ↔ domain objects.
 
 ## Generated Code (Always Regenerate)
 
@@ -19,8 +20,9 @@ infrastructure/persistence/postgres ──┘
 |--------|-----------|--------|
 | `api/openapi.yaml` | `oapi-codegen -generate types,std-http` | `api/spec/server.gen.go` |
 | `internal/domain/task/repository.go` | `mockery --config .mockery.yaml` | `internal/domain/task/mocks/` |
+| `internal/domain/department/repository.go` | `mockery --config .mockery.yaml` | `internal/domain/department/mocks/` |
 
-`make generate` runs both. The `test` and `run` targets depend on `generate`. Run `make generate` before committing after changing any interface or the OpenAPI spec.
+`make generate` runs all generators. The `test`, `build`, and `run` targets depend on `generate`. Regenerate after changing any interface or the OpenAPI spec.
 
 ## Key Commands
 
@@ -36,7 +38,7 @@ make clean           # rm -rf bin/ api/spec/ mocks/
 ## Testing Rules
 
 - **Integration tests** have build tag `//go:build integration` — won't run without `-tags=integration`
-- **Application tests** use mockery-generated mocks in `internal/domain/task/mocks/`
+- **Application tests** use mockery-generated mocks in `internal/domain/task/mocks/` and `internal/domain/department/mocks/`
 - **HTTP tests** use `httptest.Server` with `spec.HandlerFromMux()` — test through the generated router
 - **Repository interface returns `nil, nil`** on not-found. Use cases must check for nil after `FindByID`.
 - Use `count=1` to disable test caching (`make test` does this).
@@ -44,19 +46,27 @@ make clean           # rm -rf bin/ api/spec/ mocks/
 ## Domain Conventions
 
 - **Value objects** validate on construction via `NewXxx()` — return `error` for invalid state. No setters.
-- **Entity behavior** mutates state and emits events via `PullEvents()`. `ReconstituteTask()` is for DB reads only — does NOT emit events.
+- **Entity behavior** mutates state and emits events via `PullEvents()`. `ReconstituteTask()` / `ReconstituteDepartment()` are for DB reads only — does NOT emit events.
 - **Status transitions**: `todo → in_progress → done` (reopenable: `done → in_progress`). Invalid transitions return `InvalidTransition` error.
 - **`FindByID` returning nil** means not-found. Always check: `if t == nil { return nil, &NotFound{...} }`.
 
 ## Composition Root
 
-`cmd/server/main.go` is the only place where layers are wired:
+`cmd/server/main.go` wires everything via `uber-go/fx`:
 ```go
-pool := pgxpool.New(ctx, dsn)
-repo := postgres.NewTaskRepository(pool)
-uc := taskapp.NewCreateTaskUseCase(repo)  // repeat per use case
-handler := taskhttp.NewTaskHandler(createUC, getUC, ...)
-mux := spec.HandlerFromMux(handler, http.NewServeMux())
+fx.New(
+    fx.Provide(
+        loadConfig,
+        newPool,
+        postgres.NewTaskRepository,
+        postgres.NewDepartmentRepository,
+        taskapp.NewCreateTaskUseCase,  // repeat per use case
+        taskhttp.NewTaskHandler,
+        taskhttp.NewDepartmentHandler,
+        taskhttp.NewAPIHandler,  // composes TaskHandler + DepartmentHandler
+    ),
+    fx.Invoke(startServer),
+).Run()
 ```
 
 Config from env vars (`PORT`, `DATABASE_URL`). No config file. Hardcoded defaults for local dev.
@@ -64,7 +74,8 @@ Config from env vars (`PORT`, `DATABASE_URL`). No config file. Hardcoded default
 ## Go Tooling
 
 - **Requires Go 1.22+** (uses enhanced `http.ServeMux` with `{id}` path params and method routing). Go 1.26.3 in go.mod.
-- **No DI framework** — manual wiring in main.
+- **DI: `uber-go/fx`** — all wiring in `cmd/server/main.go`. No manual DI.
+- **Query builder: `Masterminds/squirrel`** — PostgreSQL queries.
 - Lint: `staticcheck ./...`
 - Only test deps beyond std: `pgx/v5`, `uuid`, `oapi-codegen/runtime`, `testify`.
 
@@ -75,5 +86,6 @@ Config from env vars (`PORT`, `DATABASE_URL`). No config file. Hardcoded default
 3. Add/update repository interface → domain package → `make generate/mocks`
 4. Add use case → application package
 5. Add/update handler → infrastructure/http → implements `ServerInterface`
-6. Wire in `cmd/server/main.go`
-7. Tests: domain (unit), application (mock), HTTP (httptest), integration (tagged)
+6. Register constructor in `fx.Provide` in `cmd/server/main.go`
+7. If new handler, wire into `APIHandler` composition in `cmd/server/main.go` and `api_handler.go`
+8. Tests: domain (unit), application (mock), HTTP (httptest), integration (tagged)

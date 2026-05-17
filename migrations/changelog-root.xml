@@ -6,5 +6,6 @@
         http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.30.xsd">
 
     <include file="v001_create_tasks.sql" relativeToChangelogFile="true"/>
+    <include file="v002_create_departments.sql" relativeToChangelogFile="true"/>
 
 </databaseChangeLog>

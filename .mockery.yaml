@@ -10,3 +10,6 @@ packages:
   github.com/wattanar/taskmanager/internal/domain/task:
     config:
       all: true
+  github.com/wattanar/taskmanager/internal/domain/department:
+    config:
+      all: true
